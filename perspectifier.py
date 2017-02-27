@@ -15,6 +15,7 @@ class Perspectifier:
         self.source_points = source_points
         self.destination_points = destination_points
         self.transformation_matrix = cv2.getPerspectiveTransform(source_points, destination_points)
+        self.inverse_transformation_matrix = cv2.getPerspectiveTransform(destination_points, source_points)
 
 
     def perspectify(self, image):
@@ -28,4 +29,17 @@ class Perspectifier:
         """
 
         return cv2.warpPerspective(image, self.transformation_matrix,
-                                   image.shape, flags=cv2.INTER_CUBIC)
+                                   (image.shape[0], image.shape[1]), flags=cv2.INTER_CUBIC)
+
+    def unperspectify(self, image):
+        """ Apply the inverse perspective transform.
+
+        Args:
+        image: Input image, to which the inverse transform is to be applied.
+
+        Returns:
+        Input 'image' with the inverse perspective transform applied.
+        """
+
+        return cv2.warpPerspective(image, self.inverse_transformation_matrix,
+                                   (image.shape[0], image.shape[1]), flags=cv2.INTER_CUBIC)

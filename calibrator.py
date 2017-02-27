@@ -2,6 +2,7 @@ import cv2
 import os
 import numpy as np
 from scipy import misc
+import progressbar
 
 class Calibrator:
     """ A camera calibrator, based on chessboard callibration images.
@@ -37,14 +38,13 @@ class Calibrator:
 
         Reads in calibration images and prepares this calibrator, using
         openCV's findChessboardcorners. This method updates self.mtx
-        and self.dist. Output images are drawn to self.output_directory which
-        show the original calibration images, and their 'undistorted' counterparts.
+        and self.dist.
 
         Args:
         None. Operates on instance data.
 
         Returns:
-        None. Assigns instance data and draws images to file.
+        None. Assigns instance data.
         """
 
         cb_nrows = self.chessboard_size[0]
@@ -57,6 +57,9 @@ class Calibrator:
         object_points = []
         # Collect corners/object points
 
+        pbar = progressbar.ProgressBar(max_value=len(self.calibration_image_paths))
+        pbar.start()
+
         for i, image_path in enumerate(self.calibration_image_paths):
 
             image = misc.imread(image_path)
@@ -68,16 +71,11 @@ class Calibrator:
                 image_points += [corners]
                 object_points += [object_point_set]
 
+            pbar.update(i)
+
+        pbar.finish()
         ret, self.mtx, self.dist, _, _ = cv2.calibrateCamera(object_points, image_points, image_gray.shape[::-1], None, None)
 
-        # Draw undistorted calibration images.
-        for image_path in self.calibration_image_paths:
-
-            image = misc.imread(image_path)
-            image_dir, image_name = os.path.split(image_path)
-            image_undistorted = self.undistort(image)
-
-            misc.imsave(os.path.join(image_dir, 'calibrated_' + image_name), image_undistorted)
 
     def undistort(self, image):
         """ Undistort an image using this calibrator.
