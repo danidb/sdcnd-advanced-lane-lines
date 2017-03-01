@@ -21,10 +21,10 @@ def preproc(image):
     image_working = clahe_RGB(image, clipLimit=2, tileGridSize=(4,4))
     image_working = cv2.GaussianBlur(image_working, (3, 3), 0)
 
-    image_ret_s = cv2.cvtColor(image_working, cv2.COLOR_RGB2HLS)
-    image_ret_s = image_working[:,:,2]
+    image_working = cv2.cvtColor(image_working, cv2.COLOR_RGB2HLS)
+    image_working = image_working[:,:,2]
 
-    image_working = cv2.cvtColor(image_working, cv2.COLOR_RGB2GRAY)
+  #  image_gray = cv2.cvtColor(image_working, cv2.COLOR_RGB2GRAY)
 
     image_ret_sx = np.absolute(cv2.Sobel(image_working, cv2.CV_64F, 1, 0))
     image_ret_sx = np.uint8(255 * image_ret_sx / np.max(image_ret_sx))
@@ -32,7 +32,7 @@ def preproc(image):
     image_ret_sy = np.absolute(cv2.Sobel(image_working, cv2.CV_64F, 0, 1))
     image_ret_sy = np.uint8(255 * image_ret_sy / np.max(image_ret_sy))
 
-    return (image_ret_sx, image_ret_sy, image_ret_s)
+    return (image_ret_sx, image_ret_sy, image_working)
 
 def clahe_RGB(img, clipLimit, tileGridSize):
     """ Apply Contrast-Limited Adaptive Histogram Equalization with OpenCV

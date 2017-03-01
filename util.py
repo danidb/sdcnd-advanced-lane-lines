@@ -15,3 +15,16 @@ def abswalk(path):
         paths += [os.path.abspath(os.path.join(this_dir, name)) for name in names]
 
     return paths
+
+def eval_poly(x, fit):
+    """ Evaluate a polynomial specifed in a numpy polyfit
+
+    Args:
+    x: Value for which the polynomial must be evaluated.
+    fit: Numpy polynomial fit.
+
+    Returns:
+    Value of evaulauting the polynomial 'fit' at x.
+    """
+    degree = len(fit)-1
+    return sum([(x ** (degree - i)) * fit[i] for i in range(degree + 1)])
