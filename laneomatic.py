@@ -13,9 +13,11 @@ class LaneOMatic:
     account the estimates for the last N frames. Exponential smoothing is applied.
 
     Args:
-    smooth: Should smoothing be applied?
+    primary_only: Should we only apply primary detection? If LaneOMatic is being
+    applied to a series of un-related still images, set this to True and the same
+    instance can be used for all detection, avoiding repitition.
 
-    smoother_decay: Decay parameter (exponential, should be in [0,1]) for smoothing.
+    smoother_gamma: Decay parameter (exponential, should be in [0,1]) for smoothing.
 
     n_windows: Number of sliding windows.
 
@@ -25,8 +27,8 @@ class LaneOMatic:
     window_threshold:
     """
 
-    def __init__(self, smooth=True, smoother_gamma=0.3, n_windows=9, window_width=100, window_threshold=50):
-        self.smooth = smooth
+    def __init__(self, primary_only=False, smoother_gamma=0.3, n_windows=9, window_width=100, window_threshold=50):
+        self.primary_only = primary_only
         self.smoother_gamma = smoother_gamma
         self.n_windows = n_windows
         self.window_width = window_width
@@ -52,7 +54,7 @@ class LaneOMatic:
         else:
             fit, output_image = self.primary_detection(binary_image)
 
-        if self.smooth:
+        if not self.primary_only:
             self.previous_fit = fit
 
         return output_image
