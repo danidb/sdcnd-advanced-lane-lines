@@ -78,8 +78,15 @@ class LaneOMatic:
         right_lane = ((image_1x > eval_poly(image_1y, prev_right_fit) - self.window_width/2) &
                       (image_1x < eval_poly(image_1y, prev_right_fit) + self.window_width/2))
 
-        left_fit = self._lane_fit(left_lane, image_1x, image_1y)
-        right_fit = self._lane_fit(right_lane, image_1x, image_1y)
+        if len(left_lane) > self.window_threshold:
+            left_fit = self._lane_fit(left_lane, image_1x, image_1y)
+        else:
+            left_fit = self.previous_fit[0]
+
+        if len(right_lane) > self.window_threshold:
+            right_fit = self._lane_fit(right_lane, image_1x, image_1y)
+        else:
+            right_fit = self.previous_fit[1]
 
         ## Apply exponential smoothing to the parameters of the fit.
         left_fit = [exp_smooth(x, s_p, self.smoother_gamma) for x, s_p in zip(left_fit, self.previous_fit[0])]
@@ -118,9 +125,9 @@ class LaneOMatic:
 
         window_image = np.zeros_like(output_image)
 
-        plot_y = np.linspace(0, binary_image.shape[0]-1, binary_image.shape[0], dtype=np.uint32)
+        plot_y = np.linspace(0, binary_image.shape[0]-1, binary_image.shape[0], dtype=np.int32)
 
-        left_fit_x = np.array(eval_poly(plot_y, left_fit), dtype=np.uint32)
+        left_fit_x = np.array(eval_poly(plot_y, left_fit), dtype=np.int32)
         left_lane_left = np.array([np.transpose(np.vstack([left_fit_x - np.int(self.window_width/2), plot_y]))])
         left_lane_right = np.array([np.transpose(np.vstack([left_fit_x + np.int(self.window_width/2), plot_y]))])
 
@@ -130,7 +137,7 @@ class LaneOMatic:
         for left_fit_point in zip(left_fit_x, plot_y):
             cv2.circle(output_image, left_fit_point, 1, (255, 255, 0))
 
-        right_fit_x = np.array(eval_poly(plot_y, right_fit), dtype=np.uint32)
+        right_fit_x = np.array(eval_poly(plot_y, right_fit), dtype=np.int32)
         right_lane_left = np.array([np.transpose(np.vstack([right_fit_x - np.int(self.window_width/2), plot_y]))])
         right_lane_right = np.array([np.transpose(np.vstack([right_fit_x + np.int(self.window_width/2), plot_y]))])
 
@@ -228,10 +235,10 @@ class LaneOMatic:
 
         output_image = np.dstack((binary_image, binary_image, binary_image))*255
 
-        plot_y = np.linspace(0, binary_image.shape[0]-1, binary_image.shape[0], dtype=np.uint32)
+        plot_y = np.linspace(0, binary_image.shape[0]-1, binary_image.shape[0], dtype=np.int32)
 
-        left_fit_x = np.array(eval_poly(plot_y, left_fit), dtype=np.uint32)
-        right_fit_x = np.array(eval_poly(plot_y, right_fit), dtype=np.uint32)
+        left_fit_x = np.array(eval_poly(plot_y, left_fit), dtype=np.int32)
+        right_fit_x = np.array(eval_poly(plot_y, right_fit), dtype=np.int32)
 
         ## The lane line pixels are filled with red, and blue to easily
         ## differentiate between the two lanes. Below the following two lines,
