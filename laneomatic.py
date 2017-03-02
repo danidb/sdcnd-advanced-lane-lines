@@ -129,8 +129,6 @@ class LaneOMatic:
                                                 image_1x, image_1y)
             right_lanes.append(right_lane)
 
-
-
             if len(left_lane) > self.window_threshold:
                 left_x = np.int(np.mean(image_1x[left_lane]))
             if len(right_lane) > self.window_threshold:
@@ -259,10 +257,10 @@ class LaneOMatic:
         output_image = np.dstack((binary_image, binary_image, binary_image))*255
         image_1x, image_1y = self._image_nonzero(binary_image)
 
-        plot_y = np.linspace(0, binary_image.shape[0]-1, binary_image.shape[0], dtype=np.uint16)
+        plot_y = np.linspace(0, binary_image.shape[0]-1, binary_image.shape[0], dtype=np.uint32)
 
-        left_fit_x = np.array(eval_poly(plot_y, left_fit), dtype=np.uint8)
-        right_fit_x = np.array(eval_poly(plot_y, right_fit), dtype=np.uint8)
+        left_fit_x = np.array(eval_poly(plot_y, left_fit), dtype=np.uint32)
+        right_fit_x = np.array(eval_poly(plot_y, right_fit), dtype=np.uint32)
 
         ## The lane line pixels are filled with red, and blue to easily
         ## differentiate between the two lanes. Below the following two lines,
