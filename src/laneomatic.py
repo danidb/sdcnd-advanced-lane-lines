@@ -1,6 +1,6 @@
 import numpy as np
 import cv2
-from util import eval_poly
+from util import eval_poly, exp_smooth
 
 class LaneOMatic:
     """ The 'Lane-O-Matic' class defines a lane line detection procedure.
@@ -48,8 +48,7 @@ class LaneOMatic:
         Returns:
         Output image, with detection information superimposed.
         """
-
-        if self.previous_fit:
+        if self.previous_fit != None:
             fit, output_image = self.secondary_detection(binary_image)
         else:
             fit, output_image = self.primary_detection(binary_image)
@@ -68,23 +67,82 @@ class LaneOMatic:
         contain only values in {0, 1}.
 
         Returns:
-        None. Updates instance data, draws output image.
+        ((left_fit, right_fit), output_image). The fit parameters have been smoothed.
         """
-
-        imabe_1x, image_1y = self._image_nonzero(binary_image)
+        image_1x, image_1y = self._image_nonzero(binary_image)
 
         prev_left_fit, prev_right_fit = self.previous_fit
 
-        left_lane = ((image_1x > eval_poly(image_1y, prev_left_fit) - margin) &
-                     (image_1x < eval_poly(image_1y, prev_left_fit) + margin))
-        right_lane = ((image_1x > eval_poly(image_1y, prev_right_fit) - margin) &
-                      (image_1x < eval_poly(image_1y, prev_right_fit) + margin))
+        left_lane = ((image_1x > eval_poly(image_1y, prev_left_fit) - self.window_width/2) &
+                     (image_1x < eval_poly(image_1y, prev_left_fit) + self.window_width/2))
+        right_lane = ((image_1x > eval_poly(image_1y, prev_right_fit) - self.window_width/2) &
+                      (image_1x < eval_poly(image_1y, prev_right_fit) + self.window_width/2))
 
         left_fit = self._lane_fit(left_lane, image_1x, image_1y)
         right_fit = self._lane_fit(right_lane, image_1x, image_1y)
 
-        return (left_fit, right_fit)
+        ## Apply exponential smoothing to the parameters of the fit.
+        left_fit = [exp_smooth(x, s_p, self.smoother_gamma) for x, s_p in zip(left_fit, self.previous_fit[0])]
+        right_fit = [exp_smooth(x, s_p, self.smoother_gamma) for x, s_p in zip(right_fit, self.previous_fit[1])]
 
+        output_image = self._draw_secondary_detection(binary_image, left_lane, left_fit,
+                                                      right_lane, right_fit,
+                                                      image_1x, image_1y)
+
+        return ((left_fit, right_fit), output_image)
+
+    def _draw_secondary_detection(self, binary_image, left_lane, left_fit, right_lane, right_fit,
+                                  image_1x, image_1y):
+        """ Draw the results of secondary detection, frames of video other than the first.
+
+        Args:
+        binary_image: The image on which the lane lines are to be detected. Note that all pre-processing
+        should have been applied to the image prior to this step. The image must be binary, and
+        contain only values in {0, 1}.
+
+        left_lane: Pixels determined to be part of the left lane
+        left_fit : Polynomial fit to the left lane
+        right_lane: Pixels determined to be part of the right lane
+        right_fit: Polynomial fit to the right lane
+
+        image_1x: Nonzero pixels (x-coord)
+        image1y: Nonzero pixels (y-coord)
+
+        Returns:
+        Image with lane lines highlighted, and fit illustrated.
+        """
+
+        output_image = np.dstack((binary_image, binary_image, binary_image))*255
+        output_image[image_1y[left_lane], image_1x[left_lane]] = [255, 0, 0]
+        output_image[image_1y[right_lane], image_1x[right_lane]] = [0, 0, 255]
+
+        window_image = np.zeros_like(output_image)
+
+        plot_y = np.linspace(0, binary_image.shape[0]-1, binary_image.shape[0], dtype=np.uint32)
+
+        left_fit_x = np.array(eval_poly(plot_y, left_fit), dtype=np.uint32)
+        left_lane_left = np.array([np.transpose(np.vstack([left_fit_x - np.int(self.window_width/2), plot_y]))])
+        left_lane_right = np.array([np.transpose(np.vstack([left_fit_x + np.int(self.window_width/2), plot_y]))])
+
+        left_lane_points = np.hstack((left_lane_left, left_lane_right))
+        cv2.fillPoly(window_image, np.int32([left_lane_points]), (0, 255, 0))
+
+        for left_fit_point in zip(left_fit_x, plot_y):
+            cv2.circle(output_image, left_fit_point, 1, (255, 255, 0))
+
+        right_fit_x = np.array(eval_poly(plot_y, right_fit), dtype=np.uint32)
+        right_lane_left = np.array([np.transpose(np.vstack([right_fit_x - np.int(self.window_width/2), plot_y]))])
+        right_lane_right = np.array([np.transpose(np.vstack([right_fit_x + np.int(self.window_width/2), plot_y]))])
+
+        right_lane_points = np.hstack((right_lane_left, right_lane_right))
+        cv2.fillPoly(window_image, np.int32([right_lane_points]), (0, 255, 0))
+
+        for right_fit_point in zip(right_fit_x, plot_y):
+            cv2.circle(output_image, right_fit_point, 1, (255, 255, 0))
+
+        cv2.addWeighted(output_image, 1, window_image, 0.3, 0)
+
+        return output_image
 
     def primary_detection(self, binary_image):
         """ Detect the lane lines in an image, or the first frame of a video.
@@ -101,9 +159,8 @@ class LaneOMatic:
         contain only values in {0, 1}.
 
         Returns:
-        None. Updates instance data, draws output image.
+        ((left_fit, right_fit), output_image)
         """
-
 
         image_1x, image_1y = self._image_nonzero(binary_image)
 
@@ -137,13 +194,71 @@ class LaneOMatic:
                 right_x = np.int(np.mean(image_1x[right_lane]))
 
 
-        left_fit  = self._lane_fit(left_lanes, image_1x, image_1y)
-        right_fit = self._lane_fit(right_lanes, image_1x, image_1y)
+        left_fit  = self._lane_fit(np.concatenate(left_lanes), image_1x, image_1y)
+        right_fit = self._lane_fit(np.concatenate(right_lanes), image_1x, image_1y)
 
-        output_image = self._draw_lane_windows(binary_image, left_windows, np.concatenate(left_lanes), left_fit,
-                                               right_windows, np.concatenate(right_lanes), right_fit, image_1x, image_1y)
+        output_image = self._draw_primary_detection(binary_image, left_windows, np.concatenate(left_lanes), left_fit,
+                                                    right_windows, np.concatenate(right_lanes), right_fit, image_1x, image_1y)
 
         return ((left_fit, right_fit), output_image)
+
+
+    def _draw_primary_detection(self, binary_image, left_windows, left_pixels,  left_fit,
+                                right_windows, right_pixels, right_fit, image_1x, image_1y):
+        """ Draw sliding windows on an image, with detected lane lines.
+
+        Args:
+        binary_image: The image on which the lane lines are to be detected. Note that all pre-processing
+        should have been applied to the image prior to this step. The image must be binary, and
+        contain only values in {0, 1}.
+
+        left_windows: List of coordinates. The windows used to detect the left lane.
+        left_pixels: Numpy array. Pixels detected to be part of the left lane.
+        left_fit: Numpy fit. Polynomial fit to the left lane.
+
+        right_windows: List of coordinates. The windows used to detect the right lane.
+        right_pixels: Numpy array. Pixels detected to be part of the right lane.
+        right_fit: Numpy fit. Polynomial fit to the right lane.
+
+
+        Returns:
+        Image ready for display, with windows, detected lane-line points, and
+        the polynomial fit to the lanes.
+        """
+
+        output_image = np.dstack((binary_image, binary_image, binary_image))*255
+
+        plot_y = np.linspace(0, binary_image.shape[0]-1, binary_image.shape[0], dtype=np.uint32)
+
+        left_fit_x = np.array(eval_poly(plot_y, left_fit), dtype=np.uint32)
+        right_fit_x = np.array(eval_poly(plot_y, right_fit), dtype=np.uint32)
+
+        ## The lane line pixels are filled with red, and blue to easily
+        ## differentiate between the two lanes. Below the following two lines,
+        ## windows are outlined in green.
+        output_image[image_1y[left_pixels], image_1x[left_pixels]] = [255, 0, 0]
+        output_image[image_1y[right_pixels], image_1x[right_pixels]] = [0, 0, 255]
+
+        for window in left_windows:
+            cv2.rectangle(output_image,
+                          (window['x0'], window['y0']),
+                          (window['x1'], window['y1']),
+                          (0, 255, 0), 2)
+
+        for window in right_windows:
+            cv2.rectangle(output_image,
+                          (window['x0'], window['y0']),
+                          (window['x1'], window['y1']),
+                          (0, 255, 0), 2)
+
+        for left_fit_point in zip(left_fit_x, plot_y):
+            cv2.circle(output_image, left_fit_point, 1, (255, 255, 0))
+
+        for right_fit_point in zip(right_fit_x, plot_y):
+            cv2.circle(output_image, right_fit_point, 1, (255, 255, 0))
+
+        return output_image
+
 
     def _lane_fit(self, lane_pixels, image_1x, image_1y):
         """ Fit a polynomial to a lane line.
@@ -157,7 +272,7 @@ class LaneOMatic:
         A polynomial fit for the lane line.
         """
 
-        lane_x, lane_y = image_1x[np.concatenate(lane_pixels)], image_1y[np.concatenate(lane_pixels)]
+        lane_x, lane_y = image_1x[lane_pixels], image_1y[lane_pixels]
         return np.polyfit(lane_y, lane_x, 2)
 
 
@@ -232,63 +347,6 @@ class LaneOMatic:
         hist_rightmax_x = np.argmax(hist[hist_midpoint:]) + hist_midpoint
 
         return (hist_leftmax_x, hist_rightmax_x)
-
-    def _draw_lane_windows(self, binary_image, left_windows, left_pixels,  left_fit,
-                           right_windows, right_pixels, right_fit, image_1x, image_1y):
-        """ Draw sliding windows on an image, with detected lane lines.
-
-        Args:
-        binary_image: The image on which the lane lines are to be detected. Note that all pre-processing
-        should have been applied to the image prior to this step. The image must be binary, and
-        contain only values in {0, 1}.
-
-        left_windows: List of coordinates. The windows used to detect the left lane.
-        left_pixels: Numpy array. Pixels detected to be part of the left lane.
-        left_fit: Numpy fit. Polynomial fit to the left lane.
-
-        right_windows: List of coordinates. The windows used to detect the right lane.
-        right_pixels: Numpy array. Pixels detected to be part of the right lane.
-        right_fit: Numpy fit. Polynomial fit to the right lane.
-
-
-        Returns:
-        Image ready for display, with windows, detected lane-line points, and
-        the polynomial fit to the lanes.
-        """
-
-        output_image = np.dstack((binary_image, binary_image, binary_image))*255
-        image_1x, image_1y = self._image_nonzero(binary_image)
-
-        plot_y = np.linspace(0, binary_image.shape[0]-1, binary_image.shape[0], dtype=np.uint32)
-
-        left_fit_x = np.array(eval_poly(plot_y, left_fit), dtype=np.uint32)
-        right_fit_x = np.array(eval_poly(plot_y, right_fit), dtype=np.uint32)
-
-        ## The lane line pixels are filled with red, and blue to easily
-        ## differentiate between the two lanes. Below the following two lines,
-        ## windows are outlined in green.
-        output_image[image_1y[left_pixels], image_1x[left_pixels]] = [255, 0, 0]
-        output_image[image_1y[right_pixels], image_1x[right_pixels]] = [0, 0, 255]
-
-        for window in left_windows:
-            cv2.rectangle(output_image,
-                          (window['x0'], window['y0']),
-                          (window['x1'], window['y1']),
-                          (0, 255, 0), 2)
-
-        for window in right_windows:
-            cv2.rectangle(output_image,
-                          (window['x0'], window['y0']),
-                          (window['x1'], window['y1']),
-                          (0, 255, 0), 2)
-
-        for left_fit_point in zip(left_fit_x, plot_y):
-            cv2.circle(output_image, left_fit_point, 1, (255, 255, 0))
-
-        for right_fit_point in zip(right_fit_x, plot_y):
-            cv2.circle(output_image, right_fit_point, 1, (255, 255, 0))
-
-        return output_image
 
     def _image_nonzero(self, binary_image):
         """ Get the nonzero elements in an image.

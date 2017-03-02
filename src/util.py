@@ -28,3 +28,17 @@ def eval_poly(x, fit):
     """
     degree = len(fit)-1
     return sum([(x ** (degree - i)) * fit[i] for i in range(degree + 1)])
+
+def exp_smooth(x, smoothed_previous, gamma):
+    """ Exponentially smooth a value
+
+    Args:
+    x: Value to be smoothed
+    smoothed_previous: Previous smoothed value.
+    gamma: Smoothing parameter.
+
+    Returns:
+    gamma * x + (1- gamma)* smothed_previous
+    """
+
+    return gamma*x + (1-gamma)*smoothed_previous
