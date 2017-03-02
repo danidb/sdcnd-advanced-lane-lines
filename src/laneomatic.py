@@ -225,7 +225,7 @@ class LaneOMatic:
 
         image_shape = binary_image.shape
 
-        hist = np.sum(binary_image[image_shape[0]/2:,:], axis=0)
+        hist = np.sum(binary_image[np.int(image_shape[0]/2):,:], axis=0)
 
         hist_midpoint = np.int(hist.shape[0]/2)
         hist_leftmax_x  = np.argmax(hist[:hist_midpoint])
