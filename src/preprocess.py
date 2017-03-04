@@ -7,8 +7,8 @@ def preproc(image):
 
     The pre-processing is as follows. First, CLAHE is applied to the
     input color image. Then, this image is converted to HLS color space, and
-    the s-channel is extracted. The same input image is also converted to
-    grayscale, and the absolute value of the gradient in the x, y directions are computed.
+    the s-channel is extracted. The gradients of this channel are then
+    computed in the x and y direction.
 
     Args:
     image: Image to be pre-processed. Must be an RGB color image.
@@ -19,12 +19,12 @@ def preproc(image):
     conversion to HLS space. The width/height of the input remain the same.
     """
     image_working = clahe_RGB(image, clipLimit=2, tileGridSize=(4,4))
+
     image_working = cv2.GaussianBlur(image_working, (3, 3), 0)
 
     image_working = cv2.cvtColor(image_working, cv2.COLOR_RGB2HLS)
     image_working = image_working[:,:,2]
 
-  #  image_gray = cv2.cvtColor(image_working, cv2.COLOR_RGB2GRAY)
 
     image_ret_sx = np.absolute(cv2.Sobel(image_working, cv2.CV_64F, 1, 0))
     image_ret_sx = np.uint8(255 * image_ret_sx / np.max(image_ret_sx))

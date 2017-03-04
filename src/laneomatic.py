@@ -27,17 +27,16 @@ class LaneOMatic:
     window_threshold:
     """
 
-    def __init__(self, primary_only=False, smoother_gamma=0.3, n_windows=9, window_width=100, window_threshold=50):
+    def __init__(self, primary_only=False, smoother_gamma=0.2, n_windows=10, window_width=100, window_threshold=50):
         self.primary_only = primary_only
         self.smoother_gamma = smoother_gamma
         self.n_windows = n_windows
         self.window_width = window_width
         self.window_threshold = window_threshold
-
         self.previous_fit = None
 
 
-    def detect_lanes(self, binary_image) :
+    def detect_lanes(self, binary_image, image_only=False) :
         """ Detect the lane lines in the provided binary image, and return the polynomial fit.
 
         Args:
@@ -45,21 +44,37 @@ class LaneOMatic:
         should have been applied to the image prior to this step. The image must be binary, and
         contain only values in {0, 1}.
 
+        image_only: Return image only? Or include curvature. Default is False (return everything)
+
         Returns:
         Output image, with detection information superimposed.
         """
         if self.previous_fit != None:
-            fit, output_image = self.secondary_detection(binary_image)
+            curvatures, fits, output_image = self.secondary_detection(binary_image)
         else:
-            fit, output_image = self.primary_detection(binary_image)
+            curvatures, fits, output_image = self.primary_detection(binary_image)
 
         if not self.primary_only:
-            self.previous_fit = fit
+            self.previous_fit = fits
 
-        return output_image
+        left_fit, right_fit = fits[0], fits[1]
+        left_curvature, right_curvature = curvatures[0], curvatures[1]
+
+        if image_only:
+            return output_image
+        else:
+            return left_fit, left_curvature, right_fit, right_curvature, output_image
 
     def secondary_detection(self, binary_image):
         """ Detection for frames of video after the first.
+
+        The sliding window technique applied for primary lane detection is expensive.
+        Given that a model already exists for the left and right lane lines, it is
+        reasonable to assume that the curves defined by these points are a suitable
+        starting point when lanes are to be detected on the next frame. Here, the parameters
+        of the curves are updated based on the points that surround them. To guard against
+        problems with individual frames, exponential smoothing is applied to the parameters
+        of the fit.
 
         Args:
         binary_image: The image on which the lane lines are to be detected. Note that all pre-processing
@@ -73,10 +88,15 @@ class LaneOMatic:
 
         prev_left_fit, prev_right_fit = self.previous_fit
 
+        ## Pixels in the region surrounding each previous lane line are detected, and
+        ## used to update the parameters of the curve.
         left_lane = ((image_1x > eval_poly(image_1y, prev_left_fit) - self.window_width/2) &
                      (image_1x < eval_poly(image_1y, prev_left_fit) + self.window_width/2))
         right_lane = ((image_1x > eval_poly(image_1y, prev_right_fit) - self.window_width/2) &
                       (image_1x < eval_poly(image_1y, prev_right_fit) + self.window_width/2))
+
+        left_curvature = self._compute_curvature(binary_image, left_lane, image_1x, image_1y)
+        right_curvature = self._compute_curvature(binary_image, right_lane, image_1x, image_1y)
 
         if len(left_lane) > self.window_threshold:
             left_fit = self._lane_fit(left_lane, image_1x, image_1y)
@@ -96,7 +116,7 @@ class LaneOMatic:
                                                       right_lane, right_fit,
                                                       image_1x, image_1y)
 
-        return ((left_fit, right_fit), output_image)
+        return ((left_curvature, right_curvature), (left_fit, right_fit), output_image)
 
     def _draw_secondary_detection(self, binary_image, left_lane, left_fit, right_lane, right_fit,
                                   image_1x, image_1y):
@@ -119,6 +139,8 @@ class LaneOMatic:
         Image with lane lines highlighted, and fit illustrated.
         """
 
+        ## See _draw_primary_detection for further details.
+
         output_image = np.dstack((binary_image, binary_image, binary_image))*255
         output_image[image_1y[left_lane], image_1x[left_lane]] = [255, 0, 0]
         output_image[image_1y[right_lane], image_1x[right_lane]] = [0, 0, 255]
@@ -132,7 +154,6 @@ class LaneOMatic:
         left_lane_right = np.array([np.transpose(np.vstack([left_fit_x + np.int(self.window_width/2), plot_y]))])
 
         left_lane_points = np.hstack((left_lane_left, left_lane_right))
-        cv2.fillPoly(window_image, np.int32([left_lane_points]), (0, 255, 0))
 
         for left_fit_point in zip(left_fit_x, plot_y):
             cv2.circle(output_image, left_fit_point, 1, (255, 255, 0))
@@ -142,7 +163,6 @@ class LaneOMatic:
         right_lane_right = np.array([np.transpose(np.vstack([right_fit_x + np.int(self.window_width/2), plot_y]))])
 
         right_lane_points = np.hstack((right_lane_left, right_lane_right))
-        cv2.fillPoly(window_image, np.int32([right_lane_points]), (0, 255, 0))
 
         for right_fit_point in zip(right_fit_x, plot_y):
             cv2.circle(output_image, right_fit_point, 1, (255, 255, 0))
@@ -171,12 +191,20 @@ class LaneOMatic:
 
         image_1x, image_1y = self._image_nonzero(binary_image)
 
+        ## The starting points are determined by from a histogram of the
+        ## bottom half of the image. They correspond to the position of the
+        ## left and right peaks of ths histogram, which we assume represent
+        ## lane lines.
         left_x_init, right_x_init = self._lane_init(binary_image)
         left_x, right_x = left_x_init, right_x_init
 
         left_lanes, right_lanes = [], []
         left_windows, right_windows = [], []
 
+        ## Proceeding vertically, from top to bottom, we collect data from window, first the left
+        ## and then the right. Centroids are updated accordingly prior to the next round.
+        ## A number of supporting methods are used here to make this read more like a template,
+        ## this structure should be adhered to elsewhere.
         for wi in range(self.n_windows):
 
             left_window = self._window_boundaries(wi, left_x, binary_image.shape)
@@ -200,14 +228,18 @@ class LaneOMatic:
             if len(right_lane) > self.window_threshold:
                 right_x = np.int(np.mean(image_1x[right_lane]))
 
+        left_curvature = self._compute_curvature(binary_image, np.concatenate(left_lanes), image_1x, image_1y)
+        right_curvature = self._compute_curvature(binary_image, np.concatenate(right_lanes), image_1x, image_1y)
 
+        ## _lane_fit will fit a quadratic polynomial to the line.
         left_fit  = self._lane_fit(np.concatenate(left_lanes), image_1x, image_1y)
         right_fit = self._lane_fit(np.concatenate(right_lanes), image_1x, image_1y)
 
         output_image = self._draw_primary_detection(binary_image, left_windows, np.concatenate(left_lanes), left_fit,
                                                     right_windows, np.concatenate(right_lanes), right_fit, image_1x, image_1y)
 
-        return ((left_fit, right_fit), output_image)
+
+        return ((left_curvature, right_curvature), (left_fit, right_fit), output_image)
 
 
     def _draw_primary_detection(self, binary_image, left_windows, left_pixels,  left_fit,
@@ -235,14 +267,15 @@ class LaneOMatic:
 
         output_image = np.dstack((binary_image, binary_image, binary_image))*255
 
+        ## This gives one point for each y position in the image, used later to illustrate the
+        ## lane line models.
         plot_y = np.linspace(0, binary_image.shape[0]-1, binary_image.shape[0], dtype=np.int32)
 
         left_fit_x = np.array(eval_poly(plot_y, left_fit), dtype=np.int32)
         right_fit_x = np.array(eval_poly(plot_y, right_fit), dtype=np.int32)
 
         ## The lane line pixels are filled with red, and blue to easily
-        ## differentiate between the two lanes. Below the following two lines,
-        ## windows are outlined in green.
+        ## differentiate between the two lanes. Windows are outlined in green.
         output_image[image_1y[left_pixels], image_1x[left_pixels]] = [255, 0, 0]
         output_image[image_1y[right_pixels], image_1x[right_pixels]] = [0, 0, 255]
 
@@ -258,6 +291,8 @@ class LaneOMatic:
                           (window['x1'], window['y1']),
                           (0, 255, 0), 2)
 
+        ## For simplicity, the fit is drawn as a series of points (circles
+        ## with radius 1)
         for left_fit_point in zip(left_fit_x, plot_y):
             cv2.circle(output_image, left_fit_point, 1, (255, 255, 0))
 
@@ -267,7 +302,7 @@ class LaneOMatic:
         return output_image
 
 
-    def _lane_fit(self, lane_pixels, image_1x, image_1y):
+    def _lane_fit(self, lane_pixels, image_1x, image_1y, x_conv=1, y_conv=1):
         """ Fit a polynomial to a lane line.
 
         Args:
@@ -275,12 +310,15 @@ class LaneOMatic:
         image_1x: Nonzero positions along the x-axis.
         image_1y: Nonzero positions along the y-axis.
 
+        x_conv: X-conversion factor (used to scale lane_x prior to fit, default 1)
+        y_conv: Y-conversion factor (used to scale lane_y prior to fit, default 1)
+
         Returns:
         A polynomial fit for the lane line.
         """
 
         lane_x, lane_y = image_1x[lane_pixels], image_1y[lane_pixels]
-        return np.polyfit(lane_y, lane_x, 2)
+        return np.polyfit(lane_y*y_conv, lane_x*x_conv, 2)
 
 
     def _window_boundaries(self, wi, centre_x, image_shape):
@@ -371,3 +409,33 @@ class LaneOMatic:
         image_1x = np.array(image_1[1])
 
         return (image_1x, image_1y)
+
+    def _compute_curvature(self, binary_image, lane_pixels, image_1x, image_1y):
+        """ Compute the radius of curvature given the left, right fit
+
+        The constants applied here for the  converstion from pixel space to real space are
+        those provided by Udacity.
+
+        Args:
+        binary_image: The image on which the lane lines are to be detected. Note that all pre-processing
+        should have been applied to the image prior to this step. The image must be binary, and
+        contain only values in {0, 1}.
+
+        lane_pixels: Pixel locations believed to be part of lane lines.
+        image_1x: Nonzero, along x
+        image_1y: Nonzero, along y
+
+        Returns:
+        Scalar, curvature.
+        """
+
+        y = binary_image.shape[0]
+
+        ym_per_pixels = 30/720
+        xm_per_pixels = 3.7/700
+
+        new_fit = self._lane_fit(lane_pixels, image_1x, image_1y, x_conv=xm_per_pixels, y_conv=ym_per_pixels)
+
+        curvature = lambda y, a, b: ((1 + (2*a*y*ym_per_pixels + b)**2)**(3/2)) / np.absolute(2*a)
+
+        return curvature(y, new_fit[0], new_fit[1])

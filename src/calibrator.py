@@ -55,8 +55,9 @@ class Calibrator:
 
         image_points = []
         object_points = []
-        # Collect corners/object points
 
+        ## Collect corners/object points for each image, they are all used together
+        ## to produce the final calibration matrix.
         pbar = progressbar.ProgressBar(max_value=len(self.calibration_image_paths))
         pbar.start()
 
