@@ -1,4 +1,5 @@
 import numpy as np
+from math import log2
 import cv2
 from util import eval_poly, exp_smooth
 
@@ -50,9 +51,9 @@ class LaneOMatic:
         Output image, with detection information superimposed.
         """
         if self.previous_fit != None:
-            curvatures, fits, output_image = self.secondary_detection(binary_image)
+            curvatures, fits, deviation, output_image = self.secondary_detection(binary_image)
         else:
-            curvatures, fits, output_image = self.primary_detection(binary_image)
+            curvatures, fits, deviation, output_image = self.primary_detection(binary_image)
 
         if not self.primary_only:
             self.previous_fit = fits
@@ -63,7 +64,7 @@ class LaneOMatic:
         if image_only:
             return output_image
         else:
-            return left_fit, left_curvature, right_fit, right_curvature, output_image
+            return left_fit, left_curvature, right_fit, right_curvature, deviation, output_image
 
     def secondary_detection(self, binary_image):
         """ Detection for frames of video after the first.
@@ -95,9 +96,6 @@ class LaneOMatic:
         right_lane = ((image_1x > eval_poly(image_1y, prev_right_fit) - self.window_width/2) &
                       (image_1x < eval_poly(image_1y, prev_right_fit) + self.window_width/2))
 
-        left_curvature = self._compute_curvature(binary_image, left_lane, image_1x, image_1y)
-        right_curvature = self._compute_curvature(binary_image, right_lane, image_1x, image_1y)
-
         if len(left_lane) > self.window_threshold:
             left_fit = self._lane_fit(left_lane, image_1x, image_1y)
         else:
@@ -116,7 +114,18 @@ class LaneOMatic:
                                                       right_lane, right_fit,
                                                       image_1x, image_1y)
 
-        return ((left_curvature, right_curvature), (left_fit, right_fit), output_image)
+        ## Compute curvature, and deviation from centre, and write log_2(curvature) (right, left) onto the image
+        left_centre, left_curvature = self._compute_curvature(binary_image, left_lane, image_1x, image_1y)
+        right_centre, right_curvature = self._compute_curvature(binary_image, right_lane, image_1x, image_1y)
+
+        curvature_text = "log2(curvature): (L: "+str(round(log2(left_curvature), 3))+", R: "+str(round(log2(right_curvature), 3))+")"
+        cv2.putText(output_image, curvature_text, (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+
+        deviation = (binary_image.shape[1]/2 * 3.7/700) - np.mean((left_centre, right_centre))
+        deviation_text = "offset: " + str(round(deviation, 2))
+        cv2.putText(output_image, deviation_text, (10, 200), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+
+        return ((left_curvature, right_curvature), (left_fit, right_fit), deviation, output_image)
 
     def _draw_secondary_detection(self, binary_image, left_lane, left_fit, right_lane, right_fit,
                                   image_1x, image_1y):
@@ -180,7 +189,7 @@ class LaneOMatic:
         lane lines in a video, or the only step required to detect lines in a
         single image.
 
-        Args:
+p        Args:
         binary_image: The image on which the lane lines are to be detected. Note that all pre-processing
         should have been applied to the image prior to this step. The image must be binary, and
         contain only values in {0, 1}.
@@ -228,8 +237,6 @@ class LaneOMatic:
             if len(right_lane) > self.window_threshold:
                 right_x = np.int(np.mean(image_1x[right_lane]))
 
-        left_curvature = self._compute_curvature(binary_image, np.concatenate(left_lanes), image_1x, image_1y)
-        right_curvature = self._compute_curvature(binary_image, np.concatenate(right_lanes), image_1x, image_1y)
 
         ## _lane_fit will fit a quadratic polynomial to the line.
         left_fit  = self._lane_fit(np.concatenate(left_lanes), image_1x, image_1y)
@@ -238,8 +245,19 @@ class LaneOMatic:
         output_image = self._draw_primary_detection(binary_image, left_windows, np.concatenate(left_lanes), left_fit,
                                                     right_windows, np.concatenate(right_lanes), right_fit, image_1x, image_1y)
 
+        ## Compute curvature, and deviation from centre, and write log_2(curvature) (right, left) onto the image
+        left_centre, left_curvature = self._compute_curvature(binary_image, np.concatenate(left_lanes), image_1x, image_1y)
+        right_centre, right_curvature = self._compute_curvature(binary_image, np.concatenate(right_lanes), image_1x, image_1y)
 
-        return ((left_curvature, right_curvature), (left_fit, right_fit), output_image)
+        curvature_text = "log2(curvature): (L: "+str(round(log2(left_curvature), 3))+", R: "+str(round(log2(right_curvature), 3))+")"
+        cv2.putText(output_image, curvature_text, (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+
+        deviation = (binary_image.shape[1]/2 * 3.7/700) - np.mean((left_centre, right_centre))
+        deviation_text = "offset: " + str(round(deviation, 2))
+        cv2.putText(output_image, deviation_text, (10, 200), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+
+
+        return ((left_curvature, right_curvature), (left_fit, right_fit), deviation, output_image)
 
 
     def _draw_primary_detection(self, binary_image, left_windows, left_pixels,  left_fit,
@@ -438,4 +456,4 @@ class LaneOMatic:
 
         curvature = lambda y, a, b: ((1 + (2*a*y*ym_per_pixels + b)**2)**(3/2)) / np.absolute(2*a)
 
-        return curvature(y, new_fit[0], new_fit[1])
+        return (eval_poly(y*ym_per_pixels, new_fit), curvature(y, new_fit[0], new_fit[1]))
